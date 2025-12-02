@@ -75,15 +75,18 @@ jobs:
               } else if (line.startsWith('+') && !line.startsWith('+++')) {
                 // This is an added line
                 const content = line.substring(1).trim();
-                
-                // Check if this line should be skipped
-                const shouldSkip = skipDependencies.some(dep => content.includes(dep));
-                
-                if (shouldSkip) {
-                  console.log(`⏭️ Skipping line ${currentLine}: ${content}`);
-                } else {
-                  changedLines.push({ lineNumber: currentLine, content });
-                  console.log(`✓ Will comment on line ${currentLine}: ${content}`);
+                const versionLineRegex = /^\s*[\w.-]+\s*=\s*".*"\s*$/;
+
+                if (versionLineRegex.test(content)) {
+                    // Check if this line should be skipped
+                    const shouldSkip = skipDependencies.some(dep => content.includes(dep));
+                    
+                    if (shouldSkip) {
+                      console.log(`⏭️ Skipping line ${currentLine}: ${content}`);
+                    } else {
+                      changedLines.push({ lineNumber: currentLine, content });
+                      console.log(`✓ Will comment on line ${currentLine}: ${content}`);
+                    }
                 }
                 
                 currentLine++;
@@ -103,7 +106,7 @@ jobs:
                 issue_number: context.issue.number,
                 body: `## 📚 Dependency Check
                 
-                ℹ️ Changes detected in \`libs.versions.toml\`, but all modified dependencies are in the skip list.
+                ℹ️ Changes detected in \`libs.versions.toml\`, but all modified dependencies are in the skip list or do not match the required format.
                 
                 No documentation updates required.`
               });
