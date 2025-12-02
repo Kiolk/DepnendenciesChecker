@@ -1,0 +1,168 @@
+name: Check Dependency Changes
+
+on:
+  pull_request:
+    branches:
+      - develop
+    paths:
+      - 'gradle/libs.versions.toml'
+
+jobs:
+  check-dependencies:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch develop branch
+        run: git fetch origin develop:develop
+
+      - name: Check for changes in libs.versions.toml
+        id: check_changes
+        run: |
+          if git diff --quiet origin/develop HEAD -- gradle/libs.versions.toml; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "No changes in libs.versions.toml"
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "Changes detected in libs.versions.toml"
+          fi
+
+      - name: Comment on changed dependency lines
+        if: steps.check_changes.outputs.has_changes == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const confluenceLink = 'https://your-company.atlassian.net/wiki/spaces/DEV/pages/123456789/Dependencies';
+            
+            // Dependencies to skip (add more as needed)
+            const skipDependencies = [
+              'gmal-kmm',
+            ];
+            
+            // Get the files changed in this PR
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            
+            const versionFile = files.find(f => f.filename === 'gradle/libs.versions.toml');
+            
+            if (!versionFile || !versionFile.patch) {
+              console.log('No changes found in gradle/libs.versions.toml');
+              return;
+            }
+            
+            console.log('Processing changes in libs.versions.toml...');
+            
+            // Parse the patch to find changed lines
+            const lines = versionFile.patch.split('\n');
+            let currentLine = 0;
+            const changedLines = [];
+            
+            for (const line of lines) {
+              if (line.startsWith('@@')) {
+                // Extract the starting line number from the diff header
+                const match = line.match(/@@ -\d+,?\d* \+(\d+)/);
+                currentLine = match ? parseInt(match[1]) : 0;
+              } else if (line.startsWith('+') && !line.startsWith('+++')) {
+                // This is an added line
+                const content = line.substring(1).trim();
+                const versionLineRegex = /^\s*[\w.-]+\s*=\s*".*"\s*$/;
+
+                if (versionLineRegex.test(content)) {
+                    // Check if this line should be skipped
+                    const shouldSkip = skipDependencies.some(dep => content.includes(dep));
+                    
+                    if (shouldSkip) {
+                      console.log(`⏭️ Skipping line ${currentLine}: ${content}`);
+                    } else {
+                      changedLines.push({ lineNumber: currentLine, content });
+                      console.log(`✓ Will comment on line ${currentLine}: ${content}`);
+                    }
+                }
+                
+                currentLine++;
+              } else if (!line.startsWith('-')) {
+                // Context line or unchanged line
+                currentLine++;
+              }
+            }
+            
+            if (changedLines.length === 0) {
+              console.log('No relevant dependency changes found (all changes are in skip list)');
+              
+              // Post info comment that all changes are skipped
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `## 📚 Dependency Check
+                
+                ℹ️ Changes detected in \`libs.versions.toml\`, but all modified dependencies are in the skip list or do not match the required format.
+                
+                No documentation updates required.`
+              });
+              
+              return;
+            }
+            
+            console.log(`Found ${changedLines.length} dependency changes to comment on`);
+
+            // Get existing comments on the PR
+            const { data: existingComments } = await github.rest.pulls.listReviewComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            
+            let successCount = 0;
+            let failCount = 0;
+            
+            // Post comments on each changed line
+            for (const change of changedLines) {
+              const commentBody = `### 📚 Documentation Update Required
+            
+            🔄 A dependency version has been changed on this line.
+            
+            ### Action Items:
+            
+            1. ✏️ Update the new version in [Confluence](${confluenceLink})
+            2. ✅ Add a comment below confirming the documentation has been updated
+            3. ✔️ Resolve this thread`;
+
+              const existingComment = existingComments.find(comment =>
+                comment.path === 'gradle/libs.versions.toml' &&
+                comment.line === change.lineNumber
+              );
+
+              if (existingComment) {
+                console.log(`💬 Comment already exists on line ${change.lineNumber}`);
+                continue; // Skip creating a new comment
+              }
+
+              try {
+                await github.rest.pulls.createReviewComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: context.issue.number,
+                  body: commentBody,
+                  commit_id: context.payload.pull_request.head.sha,
+                  path: 'gradle/libs.versions.toml',
+                  line: change.lineNumber,
+                  side: 'RIGHT'
+                });
+                successCount++;
+                console.log(`✅ Posted comment on line ${change.lineNumber}`);
+              } catch (error) {
+                failCount++;
+                console.error(`❌ Failed to comment on line ${change.lineNumber}: ${error.message}`);
+              }
+            }
