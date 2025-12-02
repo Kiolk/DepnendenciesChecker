@@ -19,7 +19,16 @@ tasks.register("checkDependencyChanges") {
 
         // Get the diff for libs.versions.toml
         val diffOutput = Runtime.getRuntime()
-            .exec(arrayOf("git", "diff", "origin/develop", "HEAD", "--", "gradle/libs.versions.toml"))
+            .exec(
+                arrayOf(
+                    "git",
+                    "diff",
+                    "origin/develop",
+                    "HEAD",
+                    "--",
+                    "gradle/libs.versions.toml"
+                )
+            )
             .inputStream
             .bufferedReader()
             .readText()
@@ -40,10 +49,12 @@ tasks.register("checkDependencyChanges") {
                     val match = Regex("""@@ -\d+,?\d* \+(\d+)""").find(line)
                     currentLine = match?.groupValues?.get(1)?.toInt() ?: 0
                 }
+
                 line.startsWith("+") && !line.startsWith("+++") -> {
                     changedLines.add(currentLine)
                     currentLine++
                 }
+
                 !line.startsWith("-") -> {
                     currentLine++
                 }
@@ -57,7 +68,12 @@ tasks.register("checkDependencyChanges") {
     }
 }
 
-fun postComment(token: String, repoName: String, prNumber: String, lineNumber: Int) {
+fun postComment(
+    token: String,
+    repoName: String,
+    prNumber: String,
+    lineNumber: Int
+) {
     val commitSha = Runtime.getRuntime()
         .exec(arrayOf("git", "rev-parse", "HEAD"))
         .inputStream
@@ -65,11 +81,33 @@ fun postComment(token: String, repoName: String, prNumber: String, lineNumber: I
         .readText()
         .trim()
 
-    val confluenceLink = "https://your-company.atlassian.net/wiki/spaces/DEV/pages/123456789/Dependencies"
+    val confluenceLink =
+        "https://your-company.atlassian.net/wiki/spaces/DEV/pages/123456789/Dependencies"
+
+    // Create the comment body with proper line breaks
+    val commentBody = """📚 **Documentation Update Required**
+
+🔄 A dependency version has been changed on this line.
+
+### Action Items:
+
+1. ✏️ Update the new version in [Confluence]($confluenceLink)
+2. ✅ Add a comment below confirming the documentation has been updated
+3. ✔️ Resolve this thread
+
+---
+
+💡 _Keeping our documentation up-to-date helps the entire team stay informed about dependency changes._"""
+
+    // Properly escape for JSON
+    val escapedBody = commentBody
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+        .replace("\n", "\\n")
 
     val body = """
         {
-          "body": "📚 **Documentation Update Required**\\n\\n🔄 A dependency version has been changed on this line.\\n\\n### Action Items:\\n\\n1. ✏️ Update the new version in [Confluence]($confluenceLink)\\n2. ✅ Add a comment below confirming the documentation has been updated\\n3. ✔️ Resolve this thread\\n\\n---\\n\\n💡 _Keeping our documentation up-to-date helps the entire team stay informed about dependency changes._",
+          "body": "$escapedBody",
           "commit_id": "$commitSha",
           "path": "gradle/libs.versions.toml",
           "line": $lineNumber,
