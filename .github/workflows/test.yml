@@ -6,6 +6,7 @@ on:
       - develop
     paths:
       - 'gradle/libs.versions.toml'
+  workflow_dispatch:
 
 jobs:
   check-dependencies:
@@ -98,19 +99,6 @@ jobs:
             
             if (changedLines.length === 0) {
               console.log('No relevant dependency changes found (all changes are in skip list or do not match the required format)');
-              
-              // Post info comment that all changes are skipped
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: `## 📚 Dependency Check
-                
-                ℹ️ Changes detected in \`libs.versions.toml\`, but all modified dependencies are in the skip list or do not match the required format.
-                
-                No documentation updates required.`
-              });
-              
               return;
             }
             
