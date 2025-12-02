@@ -97,7 +97,7 @@ jobs:
             }
             
             if (changedLines.length === 0) {
-              console.log('No relevant dependency changes found (all changes are in skip list)');
+              console.log('No relevant dependency changes found (all changes are in skip list or do not match the required format)');
               
               // Post info comment that all changes are skipped
               await github.rest.issues.createComment({
