@@ -19,7 +19,7 @@ tasks.register("checkDependencyChanges") {
         // Dependencies to skip (ignore these changes)
         val skipDependencies = setOf(
             "gmal-kmm",
-            "test-dependency",
+            "test.yml-dependency",
             // Add more dependencies to skip here
         )
 
