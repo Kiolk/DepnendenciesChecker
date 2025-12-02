@@ -137,8 +137,7 @@ jobs:
 
               const existingComment = existingComments.find(comment =>
                 comment.path === 'gradle/libs.versions.toml' &&
-                comment.line === change.lineNumber &&
-                comment.body === commentBody
+                comment.line === change.lineNumber
               );
 
               if (existingComment) {
@@ -158,7 +157,7 @@ jobs:
                   side: 'RIGHT'
                 });
                 successCount++;
-                console.log(`✅ Posted comment on line ${change.lineNumber }`);
+                console.log(`✅ Posted comment on line ${change.lineNumber}`);
               } catch (error) {
                 failCount++;
                 console.error(`❌ Failed to comment on line ${change.lineNumber}: ${error.message}`);
