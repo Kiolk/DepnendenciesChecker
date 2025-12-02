@@ -11,24 +11,29 @@ tasks.register("checkDependencyChanges") {
         val token = System.getenv("GITHUB_TOKEN")
         val prNumber = System.getenv("PR_NUMBER")
         val repoName = System.getenv("REPO_NAME")
+        val baseBranch = System.getenv("BASE_BRANCH") ?: "develop"
 
         if (token == null || prNumber == null || repoName == null) {
             println("Missing required environment variables")
             return@doLast
         }
 
+        // Only proceed if base branch is develop
+        if (baseBranch != "develop") {
+            println("Skipping check - PR is not targeting develop branch (current: $baseBranch)")
+            return@doLast
+        }
+
+        // Dependencies to skip (ignore these changes)
+        val skipDependencies = setOf(
+            "gmal-kmm",
+            "test-dependency",
+            // Add more dependencies to skip here
+        )
+
         // Get the diff for libs.versions.toml
         val diffOutput = Runtime.getRuntime()
-            .exec(
-                arrayOf(
-                    "git",
-                    "diff",
-                    "origin/develop",
-                    "HEAD",
-                    "--",
-                    "gradle/libs.versions.toml"
-                )
-            )
+            .exec(arrayOf("git", "diff", "origin/develop", "HEAD", "--", "gradle/libs.versions.toml"))
             .inputStream
             .bufferedReader()
             .readText()
@@ -39,31 +44,46 @@ tasks.register("checkDependencyChanges") {
         }
 
         // Parse the diff to find changed lines
-        val changedLines = mutableListOf<Int>()
+        data class ChangedLine(val lineNumber: Int, val content: String)
+        val changedLines = mutableListOf<ChangedLine>()
         var currentLine = 0
 
         diffOutput.lines().forEach { line ->
             when {
                 line.startsWith("@@") -> {
-                    // Extract the line number from diff header
                     val match = Regex("""@@ -\d+,?\d* \+(\d+)""").find(line)
                     currentLine = match?.groupValues?.get(1)?.toInt() ?: 0
                 }
-
                 line.startsWith("+") && !line.startsWith("+++") -> {
-                    changedLines.add(currentLine)
+                    changedLines.add(ChangedLine(currentLine, line.substring(1).trim()))
                     currentLine++
                 }
-
                 !line.startsWith("-") -> {
                     currentLine++
                 }
             }
         }
 
-        // Post comments to the PR for each changed line
-        changedLines.forEach { lineNumber ->
-            postComment(token, repoName, prNumber, lineNumber)
+        // Filter out lines that contain skipped dependencies
+        val filteredLines = changedLines.filter { change ->
+            val shouldSkip = skipDependencies.any { dep ->
+                change.content.contains(dep)
+            }
+            if (shouldSkip) {
+                println("Skipping line ${change.lineNumber}: ${change.content}")
+            }
+            !shouldSkip
+        }
+
+        if (filteredLines.isEmpty()) {
+            println("No relevant dependency changes found (all changes are in skip list)")
+            return@doLast
+        }
+
+        // Post comments for filtered lines
+        filteredLines.forEach { change ->
+            println("Posting comment for line ${change.lineNumber}: ${change.content}")
+            postComment(token, repoName, prNumber, change.lineNumber)
         }
     }
 }
@@ -95,9 +115,7 @@ fun postComment(
 2. ✅ Add a comment below confirming the documentation has been updated
 3. ✔️ Resolve this thread
 
----
-
-💡 _Keeping our documentation up-to-date helps the entire team stay informed about dependency changes._"""
+"""
 
     // Properly escape for JSON
     val escapedBody = commentBody
