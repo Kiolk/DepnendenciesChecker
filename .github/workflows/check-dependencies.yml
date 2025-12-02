@@ -2,6 +2,8 @@ name: Check Dependency Changes
 
 on:
   pull_request:
+    branches:
+      - develop
     paths:
       - 'gradle/libs.versions.toml'
 
