@@ -65,9 +65,11 @@ fun postComment(token: String, repoName: String, prNumber: String, lineNumber: I
         .readText()
         .trim()
 
+    val confluenceLink = "https://your-company.atlassian.net/wiki/spaces/DEV/pages/123456789/Dependencies"
+
     val body = """
         {
-          "body": "Please update documentation for dependency",
+          "body": "📚 **Documentation Update Required**\\n\\n🔄 A dependency version has been changed on this line.\\n\\n### Action Items:\\n\\n1. ✏️ Update the new version in [Confluence]($confluenceLink)\\n2. ✅ Add a comment below confirming the documentation has been updated\\n3. ✔️ Resolve this thread\\n\\n---\\n\\n💡 _Keeping our documentation up-to-date helps the entire team stay informed about dependency changes._",
           "commit_id": "$commitSha",
           "path": "gradle/libs.versions.toml",
           "line": $lineNumber,
