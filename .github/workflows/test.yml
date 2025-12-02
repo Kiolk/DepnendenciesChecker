@@ -112,18 +112,20 @@ jobs:
             }
             
             console.log(`Found ${changedLines.length} dependency changes to comment on`);
+
+            // Get existing comments on the PR
+            const { data: existingComments } = await github.rest.pulls.listReviewComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
             
             let successCount = 0;
             let failCount = 0;
             
             // Post comments on each changed line
             for (const change of changedLines) {
-              try {
-                await github.rest.pulls.createReviewComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: context.issue.number,
-                  body: `📚 **Documentation Update Required**
+              const commentBody = `### 📚 Documentation Update Required
             
             🔄 A dependency version has been changed on this line.
             
@@ -131,7 +133,25 @@ jobs:
             
             1. ✏️ Update the new version in [Confluence](${confluenceLink})
             2. ✅ Add a comment below confirming the documentation has been updated
-            3. ✔️ Resolve this thread`,
+            3. ✔️ Resolve this thread`;
+
+              const existingComment = existingComments.find(comment =>
+                comment.path === 'gradle/libs.versions.toml' &&
+                comment.line === change.lineNumber &&
+                comment.body === commentBody
+              );
+
+              if (existingComment) {
+                console.log(`💬 Comment already exists on line ${change.lineNumber}`);
+                continue; // Skip creating a new comment
+              }
+
+              try {
+                await github.rest.pulls.createReviewComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: context.issue.number,
+                  body: commentBody,
                   commit_id: context.payload.pull_request.head.sha,
                   path: 'gradle/libs.versions.toml',
                   line: change.lineNumber,
