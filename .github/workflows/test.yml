@@ -44,7 +44,6 @@ jobs:
             // Dependencies to skip (add more as needed)
             const skipDependencies = [
               'gmal-kmm',
-              'test-dependency',
             ];
             
             // Get the files changed in this PR
@@ -132,11 +131,7 @@ jobs:
             
             1. ✏️ Update the new version in [Confluence](${confluenceLink})
             2. ✅ Add a comment below confirming the documentation has been updated
-            3. ✔️ Resolve this thread
-            
-            ---
-            
-            💡 _Keeping our documentation up-to-date helps the entire team stay informed about dependency changes._`,
+            3. ✔️ Resolve this thread`,
                   commit_id: context.payload.pull_request.head.sha,
                   path: 'gradle/libs.versions.toml',
                   line: change.lineNumber,
@@ -149,33 +144,3 @@ jobs:
                 console.error(`❌ Failed to comment on line ${change.lineNumber}: ${error.message}`);
               }
             }
-            
-            // Post a summary comment on the PR
-            const summaryEmoji = failCount === 0 ? '✅' : '⚠️';
-            const summaryText = failCount === 0 
-              ? 'All inline comments posted successfully!' 
-              : `Posted ${successCount} comments, ${failCount} failed.`;
-            
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: `## 📚 Dependency Documentation Check
-            
-            ${summaryEmoji} **${summaryText}**
-            
-            🔍 Changes detected in \`libs.versions.toml\` - ${changedLines.length} dependency ${changedLines.length === 1 ? 'change' : 'changes'} requiring documentation updates.
-            
-            ### What to do:
-            
-            1. 📝 Review each inline comment on the changed lines
-            2. 🔗 Update the documentation in [Confluence](${confluenceLink})
-            3. ✅ Reply to each comment confirming the update
-            4. ✔️ Resolve the threads once complete
-            
-            ---
-            
-            _Thank you for keeping our documentation up-to-date! 🙏_`
-            });
-            
-            console.log('✅ Posted summary comment on PR');
