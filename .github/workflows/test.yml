@@ -1,0 +1,147 @@
+name: Check Dependency Changes
+
+on:
+  pull_request:
+    branches:
+      - develop
+    paths:
+      - 'gradle/libs.versions.toml'
+  workflow_dispatch:
+    inputs:
+      pull_request_number:
+        description: 'The PR number to run on'
+        required: true
+
+jobs:
+  check-dependencies:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get PR number
+        id: get_pr_number
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "pr_number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+          else
+            echo "pr_number=${{ github.event.inputs.pull_request_number }}" >> $GITHUB_OUTPUT
+          fi
+        shell: bash
+
+      - name: Checkout PR code
+        if: github.event_name == 'workflow_dispatch'
+        run: gh pr checkout ${{ steps.get_pr_number.outputs.pr_number }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fetch develop branch
+        run: git fetch origin develop:develop
+
+      - name: Check for changes in libs.versions.toml
+        id: check_changes
+        run: |
+          if git diff --quiet origin/develop HEAD -- gradle/libs.versions.toml; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+        shell: bash
+
+      - name: Comment on changed dependency lines
+        if: steps.check_changes.outputs.has_changes == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = ${{ steps.get_pr_number.outputs.pr_number }};
+            const confluenceLink = 'https://your-company.atlassian.net/wiki/spaces/DEV/pages/123456789/Dependencies';
+            const skipDependencies = ['gmal-kmm'];
+            const filePath = 'gradle/libs.versions.toml';
+
+            const { data: pullRequest } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+            const commit_id = pullRequest.head.sha;
+
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+            
+            const versionFile = files.find(f => f.filename === filePath);
+            
+            if (!versionFile || !versionFile.patch) {
+              console.log(`No changes found in ${filePath}`);
+              return;
+            }
+            
+            const lines = versionFile.patch.split('\n');
+            let currentLine = 0;
+            const changedLines = [];
+            
+            for (const line of lines) {
+              if (line.startsWith('@@')) {
+                const match = line.match(/@@ -\d+,?\d* \+(\d+)/);
+                currentLine = match ? parseInt(match[1]) : 0;
+              } else if (line.startsWith('+') && !line.startsWith('+++')) {
+                const content = line.substring(1).trim();
+                const versionLineRegex = /^\s*[\w.-]+\s*=\s*".*"\s*$/;
+
+                if (versionLineRegex.test(content)) {
+                    const shouldSkip = skipDependencies.some(dep => content.includes(dep));
+                    if (shouldSkip) {
+                      console.log(`⏭️ Skipping line ${currentLine}: ${content}`);
+                    } else {
+                      changedLines.push({ lineNumber: currentLine, content });
+                    }
+                }
+                currentLine++;
+              } else if (!line.startsWith('-')) {
+                currentLine++;
+              }
+            }
+            
+            if (changedLines.length === 0) {
+              console.log('No relevant dependency changes found.');
+              return;
+            }
+
+            const { data: existingComments } = await github.rest.pulls.listReviewComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+
+            for (const change of changedLines) {
+              const commentBody = `### 📚 Documentation Update Required\n\n🔄 A dependency version has been changed on this line.\n\n### Action Items:\n\n1. ✏️ Update the new version in [Confluence](${confluenceLink})\n2. ✅ Add a comment below confirming the documentation has been updated\n3. ✔️ Resolve this thread`;
+
+              const existingComment = existingComments.find(comment =>
+                comment.path === filePath &&
+                comment.line === change.lineNumber
+              );
+
+              if (existingComment) {
+                console.log(`💬 Comment already exists on line ${change.lineNumber}`);
+                continue;
+              }
+
+              await github.rest.pulls.createReviewComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+                body: commentBody,
+                commit_id: commit_id,
+                path: filePath,
+                line: change.lineNumber,
+                side: 'RIGHT'
+              });
+            }

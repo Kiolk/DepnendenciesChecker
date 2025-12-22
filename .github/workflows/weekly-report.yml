@@ -1,0 +1,85 @@
+name: Weekly PR report to Slack
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"  # Monday 09:00 UTC
+  workflow_dispatch:
+    inputs:
+      weeks_ago:
+        description: "Report for how many weeks ago? (0 = last week, 1 = week before last)"
+        required: false
+        default: "0"
+      post_to_slack:
+        description: "Post to Slack (true/false)"
+        required: false
+        default: "true"
+
+permissions:
+  pull-requests: read
+  issues: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build report and (optionally) post to Slack
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          WEEKS_AGO: ${{ inputs.weeks_ago || '0' }}
+          POST_TO_SLACK: ${{ inputs.post_to_slack || 'true' }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y >/dev/null
+          sudo apt-get install -y jq >/dev/null
+
+          # Compute last-week window (UTC), with optional weeks_ago offset.
+          # We define week as Mon 00:00:00 -> next Mon 00:00:00 (exclusive)
+          OFFSET_DAYS=$(( 7 * (WEEKS_AGO + 1) ))
+          START="$(date -u -d "last monday -${OFFSET_DAYS} days" +%Y-%m-%dT00:00:00Z)"
+          END="$(date -u -d "last monday -$((7 * WEEKS_AGO)) days" +%Y-%m-%dT00:00:00Z)"
+
+          CREATED=$(gh api -X GET "search/issues" -f q="repo:${REPO} is:pr created:${START}..${END}" --jq '.total_count')
+          MERGED=$(gh api -X GET "search/issues" -f q="repo:${REPO} is:pr is:merged merged:${START}..${END}" --jq '.total_count')
+          CLOSED=$(gh api -X GET "search/issues" -f q="repo:${REPO} is:pr closed:${START}..${END}" --jq '.total_count')
+
+          OPEN=$(gh api -X GET "search/issues" -f q="repo:${REPO} is:pr is:open" --jq '.total_count')
+          DRAFT=$(gh api -X GET "search/issues" -f q="repo:${REPO} is:pr is:open draft:true" --jq '.total_count')
+          READY=$((OPEN - DRAFT))
+
+          PERIOD="$(date -u -d "${START}" +%F) → $(date -u -d "${END} -1 second" +%F) (UTC)"
+
+          payload=$(jq -n \
+            --arg repo "$REPO" \
+            --arg period "$PERIOD" \
+            --arg created "$CREATED" \
+            --arg merged "$MERGED" \
+            --arg closed "$CLOSED" \
+            --arg open "$OPEN" \
+            --arg ready "$READY" \
+            --arg draft "$DRAFT" \
+            '{
+              blocks: [
+                {type:"header", text:{type:"plain_text", text:("Weekly PR Report — " + $repo)}},
+                {type:"context", elements:[{type:"mrkdwn", text:("*Period:* " + $period)}]},
+                {type:"divider"},
+                {type:"section", text:{type:"mrkdwn",
+                  text:("*Last week activity*\n• PRs created: *" + $created + "*\n• PRs merged: *" + $merged + "*\n• PRs closed (incl. merged): *" + $closed + "*")
+                }},
+                {type:"section", text:{type:"mrkdwn",
+                  text:("*Current status*\n• Open PRs: *" + $open + "* (Ready: *" + $ready + "*, Draft: *" + $draft + "*)")
+                }}
+              ]
+            }')
+
+          echo "$payload" | jq '.'
+
+          if [ "${POST_TO_SLACK}" = "true" ]; then
+            curl -sS -X POST -H "Content-type: application/json" \
+              --data "$payload" \
+              "$SLACK_WEBHOOK_URL" >/dev/null
+            echo "Posted Slack report."
+          else
+            echo "Skipped posting to Slack (post_to_slack=false)."
+          fi
